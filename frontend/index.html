@@ -2,117 +2,131 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Online Voting System</title>
+    <title>Advanced Online Voting System</title>
+    <!-- Bonus: Chart.js library for the live bar chart -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { font-family: Arial, sans-serif; background-color: #f4f4f9; color: #333; text-align: center; margin-top: 50px; }
-        .container { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); max-width: 400px; margin: auto; }
-        input[type="text"] { width: 80%; padding: 10px; margin: 15px 0; border: 1px solid #ccc; border-radius: 5px; }
-        button { background-color: #0056b3; color: white; border: none; padding: 10px 20px; margin: 5px; border-radius: 5px; cursor: pointer; }
+        body { font-family: Arial, sans-serif; background-color: #f4f4f9; text-align: center; padding: 20px; color: #333; }
+        .container { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); max-width: 600px; margin: auto; }
+        input { width: 80%; padding: 10px; margin: 10px 0; border: 1px solid #ccc; border-radius: 5px; }
+        button { background-color: #0056b3; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; margin: 5px; }
         button:hover { background-color: #004494; }
-        #message { margin-top: 20px; font-weight: bold; }
-        .candidate-card { border: 1px solid #ddd; padding: 15px; margin: 10px 0; border-radius: 5px; background: #fafafa; }
+        .post-section { margin-bottom: 20px; padding: 15px; border: 1px solid #eee; background: #fafafa; border-radius: 5px; }
+        #audit-log { font-family: monospace; font-size: 13px; text-align: left; background: #222; color: #0f0; padding: 15px; border-radius: 5px; height: 150px; overflow-y: auto; margin-top: 20px;}
     </style>
 </head>
 <body>
-
     <div class="container" id="login-screen">
-        <h2>Student Voting Portal</h2>
-        <p>Please enter your unique Voter ID to continue.</p>
-        <input type="text" id="voter-id" placeholder="e.g., V101 or V102">
+        <h2>Advanced Voter Authentication</h2>
+        <p>Enter your ID and Name to access the ballot.</p>
+        <input type="text" id="voter-id" placeholder="Voter ID (e.g., V101)">
+        <input type="text" id="voter-name" placeholder="Full Name (e.g., Student One)">
         <br>
-        <button onclick="login()">Access Ballot</button>
+        <button onclick="login()">Authenticate & Enter</button>
+        <p id="login-error" style="color: red; font-weight: bold;"></p>
     </div>
 
     <div class="container" id="ballot-screen" style="display:none;">
-        <h2>Cast Your Vote</h2>
-        <p>Select a candidate below. You may only vote once.</p>
-        <div id="candidate-list">Loading candidates...</div>
-        <p id="message"></p>
+        <h2>Official Ballot</h2>
+        <p id="vote-msg" style="font-weight: bold;"></p>
+        <div id="candidate-list"></div>
         <hr>
-        <button onclick="showResults()" style="background-color: #28a745;">View Live Results</button>
+        <button onclick="showResults()" style="background-color: #28a745;">Admin: View Live Results & Audit Log</button>
     </div>
 
     <div class="container" id="results-screen" style="display:none;">
         <h2>Live Election Results</h2>
-        <div id="results-list"></div>
+        <canvas id="resultsChart"></canvas>
+        
+        <h3 style="margin-top: 30px;">System Audit Log</h3>
+        <div id="audit-log"></div>
         <br>
-        <button onclick="location.reload()">Back to Login</button>
+        <button onclick="location.reload()">End Session & Return Home</button>
     </div>
 
     <script>
-        // Points to your running Java HttpServer
         const API_URL = "http://localhost:8080/api";
         let currentVoterId = "";
 
         function login() {
-            const input = document.getElementById('voter-id').value.trim();
-            if (input === "") {
-                alert("Voter ID cannot be empty.");
-                return;
-            }
-            currentVoterId = input;
+            const id = document.getElementById('voter-id').value.trim();
+            const name = document.getElementById('voter-name').value.trim();
             
-            // Hide login, show ballot
-            document.getElementById('login-screen').style.display = 'none';
-            document.getElementById('ballot-screen').style.display = 'block';
-            fetchCandidatesForBallot();
+            fetch(`${API_URL}/auth?voterId=${id}&name=${encodeURIComponent(name)}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.message === "Success") {
+                        currentVoterId = id;
+                        document.getElementById('login-screen').style.display = 'none';
+                        document.getElementById('ballot-screen').style.display = 'block';
+                        loadBallot();
+                    } else {
+                        document.getElementById('login-error').innerText = data.message;
+                    }
+                });
         }
 
-        function fetchCandidatesForBallot() {
+        function loadBallot() {
             fetch(API_URL + "/candidates")
-                .then(response => response.json())
+                .then(res => res.json())
                 .then(candidates => {
                     const list = document.getElementById('candidate-list');
                     list.innerHTML = ""; 
                     
-                    candidates.forEach(candidate => {
-                        const div = document.createElement('div');
-                        div.className = "candidate-card";
-                        div.innerHTML = `
-                            <strong>${candidate.name}</strong><br>
-                            <button onclick="submitVote(${candidate.id})">Vote for ${candidate.name}</button>
-                        `;
-                        list.appendChild(div);
+                    // Group candidates by their specific election post
+                    const posts = [...new Set(candidates.map(c => c.post))];
+                    
+                    posts.forEach(post => {
+                        let postHtml = `<div class="post-section"><h3>Race: ${post}</h3>`;
+                        candidates.filter(c => c.post === post).forEach(c => {
+                            postHtml += `<button onclick="submitVote(${c.id})">Vote for ${c.name}</button> `;
+                        });
+                        postHtml += `</div>`;
+                        list.innerHTML += postHtml;
                     });
-                })
-                .catch(err => console.error("Error fetching candidates:", err));
+                });
         }
 
         function submitVote(candidateId) {
             fetch(`${API_URL}/vote?voterId=${currentVoterId}&candidateId=${candidateId}`)
-                .then(response => response.json())
+                .then(res => res.json())
                 .then(data => {
-                    const msgElement = document.getElementById('message');
-                    msgElement.innerText = data.message;
-                    
-                    // Change color based on success or error
-                    if(data.message.startsWith("Success")) {
-                        msgElement.style.color = "green";
-                    } else {
-                        msgElement.style.color = "red";
-                    }
-                })
-                .catch(err => console.error("Error submitting vote:", err));
+                    const msg = document.getElementById('vote-msg');
+                    msg.innerText = data.message;
+                    msg.style.color = data.message.startsWith("Success") ? "green" : "red";
+                });
         }
 
         function showResults() {
             document.getElementById('ballot-screen').style.display = 'none';
             document.getElementById('results-screen').style.display = 'block';
 
+            // Generate the live Chart.js Bar Chart
             fetch(API_URL + "/candidates")
-                .then(response => response.json())
+                .then(res => res.json())
                 .then(candidates => {
-                    const list = document.getElementById('results-list');
-                    list.innerHTML = "";
-                    
-                    candidates.forEach(candidate => {
-                        list.innerHTML += `
-                            <div class="candidate-card">
-                                <strong>${candidate.name}</strong>: ${candidate.votes} votes
-                            </div>
-                        `;
+                    const ctx = document.getElementById('resultsChart').getContext('2d');
+                    new Chart(ctx, {
+                        type: 'bar',
+                        data: {
+                            labels: candidates.map(c => c.name + ' (' + c.post + ')'),
+                            datasets: [{
+                                label: 'Total Votes Cast',
+                                data: candidates.map(c => c.votes),
+                                backgroundColor: ['#007bff', '#28a745', '#ffc107', '#dc3545']
+                            }]
+                        },
+                        options: { scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } }
                     });
+                });
+
+            // Fetch and render the anonymous audit log
+            fetch(API_URL + "/audit")
+                .then(res => res.json())
+                .then(logs => {
+                    const logDiv = document.getElementById('audit-log');
+                    logDiv.innerHTML = logs.length === 0 ? "<div>No votes recorded yet.</div>" : 
+                                       logs.map(log => `<div>> ${log}</div>`).join("");
                 });
         }
     </script>
